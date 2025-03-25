@@ -1,0 +1,4 @@
+Flask
+WeasyPrint
+python-docx
+pytest
