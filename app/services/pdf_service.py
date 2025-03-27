@@ -4,9 +4,10 @@ import tempfile
 
 def generate_pdf(content_html, header_html, footer_html, output_path, watermark=None):
     """
-    Generate a PDF document from HTML content using pdfkit (wkhtmltopdf)
+    Generate a PDF document with correct watermark and last-page-only footer
+    Using a simpler, more reliable approach with wkhtmltopdf's built-in features
     """
-    # Configure the path to wkhtmltopdf
+    # Configure path to wkhtmltopdf
     wkhtmltopdf_paths = [
         r'C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe',
         r'C:\Program Files (x86)\wkhtmltopdf\bin\wkhtmltopdf.exe',
@@ -19,135 +20,153 @@ def generate_pdf(content_html, header_html, footer_html, output_path, watermark=
             config = pdfkit.configuration(wkhtmltopdf=path)
             break
     
-    # Create temporary files for header and footer
-    header_path = None
-    footer_path = None
-    html_path = None
+    # Create temporary files
+    temp_files = []
     
     try:
-        # Create watermark style if provided
-        watermark_style = ""
-        watermark_content = ""
-        
+        # Extract watermark text
+        watermark_text = ""
         if watermark:
-            # Extract plain text from watermark HTML if needed
             import re
             watermark_text = re.sub(r'<[^>]*>', '', watermark).strip()
-            
-            # Create a better positioned watermark that appears on all pages
-            watermark_style = """
-                /* Use a pseudo-element to create the watermark background */
-                .watermark-container {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    z-index: -1000;
-                    pointer-events: none;
-                }
-                
-                .watermark {
-                    position: absolute;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%) rotate(-45deg);
-                    font-size: 120px;
-                    color: rgba(200, 200, 200, 0.3);
-                    white-space: nowrap;
-                    z-index: -1000;
-                }
-            """
-            
-            watermark_content = f"""
-                <div class="watermark-container">
-                    <div class="watermark">{watermark_text}</div>
-                </div>
-            """
         
-        # Save header HTML to temporary file if provided
-        if header_html:
-            with tempfile.NamedTemporaryFile(suffix='.html', delete=False, mode='w', encoding='utf-8') as f:
-                f.write(f"<html><head><style></style></head><body>{header_html}</body></html>")
-                header_path = f.name
-        
-        # Save footer HTML to temporary file if provided - for last page only
-        if footer_html:
-            with tempfile.NamedTemporaryFile(suffix='.html', delete=False, mode='w', encoding='utf-8') as f:
-                # We'll use a special script to show footer only on last page
-                last_page_footer = f"""
-                <html>
-                <head>
-                    <style>
-                        /* Hide footer on non-last pages */
-                        .footer-content {{ display: none; }}
-                        /* Show footer only when we detect it's the last page */
-                        .footer-content.is-last-page {{ display: block; }}
-                    </style>
-                    <script>
-                        function isLastPage() {{
-                            // Get the current page number from wkhtmltopdf's vars
-                            var page = parseInt(document.querySelector('.page').innerHTML);
-                            var topage = parseInt(document.querySelector('.topage').innerHTML);
-                            
-                            // If current page equals total pages, we're on the last page
-                            if (page === topage) {{
-                                document.querySelector('.footer-content').classList.add('is-last-page');
-                            }}
-                        }}
-                    </script>
-                </head>
-                <body onload="isLastPage()">
-                    <!-- Placeholders for wkhtmltopdf to insert page numbers -->
-                    <span style="display: none;" class="page"></span>
-                    <span style="display: none;" class="topage"></span>
-                    
-                    <!-- The actual footer content -->
-                    <div class="footer-content">
-                        {footer_html}
-                    </div>
-                </body>
-                </html>
-                """
-                
-                f.write(last_page_footer)
-                footer_path = f.name
-        
-        # Create a complete HTML document with the watermark properly positioned
-        full_html = f"""
+        # Create the complete HTML with watermark and content
+        main_html = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="UTF-8">
             <title>Generated Document</title>
             <style>
-                {watermark_style}
-                body {{ 
-                    font-family: Arial, sans-serif; 
-                    margin: 0; 
-                    padding: 20px; 
-                    position: relative; 
-                    z-index: 1;
+                @page {{
+                    size: A4;
+                    margin: 25mm 15mm 25mm 15mm;
                 }}
                 
-                /* Ensure all content is above the watermark */
-                #content {{
+                body {{
+                    font-family: Arial, sans-serif;
+                    margin: 0;
+                    padding: 0;
+                    position: relative;
+                }}
+                
+                .content {{
                     position: relative;
                     z-index: 10;
+                }}
+                
+                /* Watermark styling */
+                body::before {{
+                    content: "{watermark_text}";
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    font-size: 100px;
+                    color: rgba(200, 200, 200, 0.3);
+                    transform: rotate(-45deg);
+                    pointer-events: none;
+                    z-index: -1000;
                 }}
             </style>
         </head>
         <body>
-            {watermark_content}
-            <div id="content">{content_html}</div>
+            <div class="content">
+                {content_html}
+            </div>
         </body>
         </html>
         """
         
-        # Save the HTML to a temporary file
-        with tempfile.NamedTemporaryFile(suffix='.html', delete=False, mode='w', encoding='utf-8') as f:
-            f.write(full_html)
-            html_path = f.name
+        # Save main HTML to a temporary file
+        main_html_path = tempfile.mktemp(suffix='.html')
+        with open(main_html_path, 'w', encoding='utf-8') as f:
+            f.write(main_html)
+        temp_files.append(main_html_path)
+        
+        # Create header HTML if provided
+        header_html_path = None
+        if header_html:
+            header_html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <style>
+                    body {{
+                        font-family: Arial, sans-serif;
+                        margin: 0;
+                        padding: 5px;
+                        text-align: center;
+                    }}
+                </style>
+            </head>
+            <body>
+                {header_html}
+            </body>
+            </html>
+            """
+            
+            header_html_path = tempfile.mktemp(suffix='.html')
+            with open(header_html_path, 'w', encoding='utf-8') as f:
+                f.write(header_html_content)
+            temp_files.append(header_html_path)
+        
+        # Create footer HTML with JavaScript to only show on last page
+        footer_html_path = None
+        if footer_html:
+            footer_html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <style>
+                    body {{
+                        font-family: Arial, sans-serif;
+                        margin: 0;
+                        padding: 5px;
+                        text-align: center;
+                    }}
+                    
+                    .footer-content {{
+                        /* Start hidden */
+                        display: none;
+                    }}
+                </style>
+                <script>
+                    function checkLastPage() {{
+                        /* Get page numbers */
+                        var page = parseInt(document.getElementById('page').innerText);
+                        var topage = parseInt(document.getElementById('topage').innerText);
+                        
+                        /* Show footer only on last page */
+                        if (page === topage) {{
+                            document.getElementById('footer').style.display = 'block';
+                        }}
+                    }}
+                </script>
+            </head>
+            <body onload="checkLastPage()">
+                <!-- Hidden elements with page numbers -->
+                <span id="page" style="display:none;">{{page}}</span>
+                <span id="topage" style="display:none;">{{topage}}</span>
+                
+                <!-- Footer content -->
+                <div id="footer" class="footer-content">
+                    {footer_html}
+                </div>
+            </body>
+            </html>
+            """
+            
+            footer_html_path = tempfile.mktemp(suffix='.html')
+            with open(footer_html_path, 'w', encoding='utf-8') as f:
+                f.write(footer_html_content)
+            temp_files.append(footer_html_path)
         
         # Configure options for wkhtmltopdf
         options = {
@@ -157,36 +176,39 @@ def generate_pdf(content_html, header_html, footer_html, output_path, watermark=
             'margin-bottom': '25mm',
             'margin-left': '15mm',
             'encoding': 'UTF-8',
-            'javascript-delay': '1000',  # Wait for JS to execute
-            'enable-local-file-access': None,
-            'print-media-type': None,
             'enable-javascript': None,
-            'no-stop-slow-scripts': None
+            'javascript-delay': 1000,  # Give time for JS to run
+            'no-stop-slow-scripts': None,
+            'enable-local-file-access': None,
+            'quiet': None
         }
         
-        # Add header and footer if available
-        if header_path:
-            options['header-html'] = header_path
+        # Add header if provided
+        if header_html_path:
+            options['header-html'] = header_html_path
             options['header-spacing'] = '5'
         
-        if footer_path:
-            options['footer-html'] = footer_path
+        # Add footer if provided
+        if footer_html_path:
+            options['footer-html'] = footer_html_path
             options['footer-spacing'] = '5'
             
-            # These variables will be available in the footer HTML
-            options['footer-left'] = '[page]'
-            options['footer-right'] = '[topage]'
+            # These replace the {{page}} and {{topage}} in the footer HTML
+            options['replace'] = [
+                ['{{page}}', '[page]'],
+                ['{{topage}}', '[topage]']
+            ]
         
-        # Generate PDF using wkhtmltopdf
-        pdfkit.from_file(html_path, output_path, options=options, configuration=config)
+        # Generate PDF with wkhtmltopdf
+        pdfkit.from_file(main_html_path, output_path, options=options, configuration=config)
         
         return output_path
-    
+        
     finally:
         # Clean up temporary files
-        for path in [header_path, footer_path, html_path]:
-            if path and os.path.exists(path):
-                try:
+        for path in temp_files:
+            try:
+                if os.path.exists(path):
                     os.unlink(path)
-                except:
-                    pass  # Ignore errors on cleanup
+            except Exception:
+                pass
