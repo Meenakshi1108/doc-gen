@@ -6,7 +6,7 @@ A Flask-based microservice for generating PDF and DOCX documents from HTML conte
 
 - **Multiple Document Formats**: Generate both PDF and DOCX documents from HTML content
 - **Header Support**: Add custom headers to each page of your documents
-- **Footer Support**: Add custom footers to the last page of documents
+- **Footer Support**: Add custom footers to the last page of documents only
 - **Watermarking**: Apply text watermarks across all document pages
 - **Page Breaks**: Control document pagination with HTML-based page breaks
 - **RESTful API**: Simple HTTP API with proper validation and error responses
@@ -19,7 +19,7 @@ A Flask-based microservice for generating PDF and DOCX documents from HTML conte
 - **wkhtmltopdf/pdfkit**: HTML to PDF conversion
 - **python-docx**: HTML to DOCX conversion
 - **BeautifulSoup**: HTML parsing
-- **PyPDF2**: PDF manipulation
+- **PyPDF2**: PDF manipulation for last-page footer implementation
 
 ## Getting Started
 
@@ -48,11 +48,14 @@ A Flask-based microservice for generating PDF and DOCX documents from HTML conte
 
 ### Running the Service
 
-```
-python -m app.main
-```
+1. Start the service:
+   ```
+   python -m app.main
+   ```
 
-The service will start on http://localhost:5000 with API documentation available at http://localhost:5000/api/docs
+2. The service will be available at:
+   - API Endpoint: `http://localhost:5000/api/v1/generate`
+   - API Documentation: `http://localhost:5000/api/docs`
 
 ## API Usage
 
@@ -63,105 +66,44 @@ The service will start on http://localhost:5000 with API documentation available
 **Request Body**:
 ```json
 {
-  "content_html": "<p>Main document content</p>",
-  "header_html": "<p>Header text</p>",
-  "footer_html": "<p>Footer text</p>",
-  "document_type": "pdf",
+  "content_html": "<h1>Document Title</h1><p>This is the document content.</p>",
+  "header_html": "<div>Header Content</div>",
+  "footer_html": "<div>Footer Content - Only on Last Page</div>",
+  "document_type": "pdf", /* or "docx" */
   "watermark": "CONFIDENTIAL"
 }
 ```
 
-**Parameters**:
-- `content_html` (required): HTML content for the document body
-- `header_html` (optional): HTML content for the header
-- `footer_html` (optional): HTML content for the footer
-- `document_type` (required): Output format - either "pdf" or "docx"
-- `watermark` (optional): Text for watermark
-
-**Response**: 
-- `200 OK`: Returns the generated document as a file download
-- `400 Bad Request`: Validation error
-- `500 Internal Server Error`: Processing error
-
-## Document Formatting
-
-### Page Breaks
-
-To add page breaks in your document content:
-```html
-<p>Content before page break</p>
-<p style="page-break-before: always;">Content after page break</p>
-```
-
-### Tables
-
-Standard HTML tables are supported:
-```html
-<table>
-  <tr>
-    <th>Header 1</th>
-    <th>Header 2</th>
-  </tr>
-  <tr>
-    <td>Data 1</td>
-    <td>Data 2</td>
-  </tr>
-</table>
-```
+**Response**: The generated document file as a download attachment.
 
 ## Examples
 
-### Creating a PDF with Header and Footer
+### HTML Content with Page Breaks
 
-```python
-import requests
-import json
+To insert page breaks in your content, use the following HTML:
 
-url = "http://localhost:5000/api/v1/generate"
-payload = {
-    "content_html": "<h1>Sample Document</h1><p>This is a sample document.</p>",
-    "header_html": "<p>Company Name - Confidential</p>",
-    "footer_html": "<p>Page 1</p>",
-    "document_type": "pdf"
-}
-headers = {"Content-Type": "application/json"}
-
-response = requests.post(url, data=json.dumps(payload), headers=headers)
-
-with open("output.pdf", "wb") as f:
-    f.write(response.content)
+```html
+<p>First page content</p>
+<p style="page-break-before: always;">Second page content</p>
 ```
 
-### Creating a DOCX with Watermark
+## Error Handling
 
-```python
-import requests
-import json
+The API returns appropriate HTTP status codes and error messages:
 
-url = "http://localhost:5000/api/v1/generate"
-payload = {
-    "content_html": "<h1>Sample Document</h1><p>This is a sample document.</p>",
-    "document_type": "docx",
-    "watermark": "DRAFT"
-}
-headers = {"Content-Type": "application/json"}
+- `400 Bad Request`: Invalid input parameters
+- `500 Internal Server Error`: Server-side processing errors
 
-response = requests.post(url, data=json.dumps(payload), headers=headers)
+## Project Structure
 
-with open("output.docx", "wb") as f:
-    f.write(response.content)
-```
+- `app/main.py`: Application entry point
+- `app/api/document_api.py`: API routes and request handling
+- `app/services/document_service.py`: Main document generation service
+- `app/services/pdf_service.py`: PDF generation implementation
+- `app/services/docx_service.py`: DOCX generation implementation
+- `app/services/docx_watermark.py`: DOCX watermarking implementation
+- `app/validators/input_validator.py`: Request validation
+- `app/utils/file_cleanup.py`: Temporary file management
 
-## Architecture
 
-The service follows a layered architecture:
-
-1. **API Layer**: Handles HTTP requests and responses
-2. **Service Layer**: Implements document generation logic
-3. **Validation Layer**: Validates input parameters
-4. **Utilities**: Manages resources like temporary files
-
-## Security Considerations
-
-- No authentication is included - add your own authentication layer for production use
 
