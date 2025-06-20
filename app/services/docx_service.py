@@ -6,13 +6,21 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from bs4 import BeautifulSoup
 import os
+from app.services.docx_watermark import add_proper_watermark
 
 def generate_docx(content_html, header_html, footer_html, output_path, watermark=None):
     """
-    Generate a DOCX document from HTML content
-    Improved version that correctly handles:
-    - Watermark on all pages
-    - Footer only on the last page
+    Generate a DOCX document from HTML content with proper watermark and footer on last page only
+    
+    Args:
+        content_html (str): HTML content for the body
+        header_html (str): HTML content for the header
+        footer_html (str): HTML content for the footer (last page only)
+        output_path (str): Path to save the generated DOCX
+        watermark (str, optional): HTML content for watermark
+        
+    Returns:
+        str: Path to the generated document
     """
     # Create a new Document
     doc = Document()
@@ -35,7 +43,11 @@ def generate_docx(content_html, header_html, footer_html, output_path, watermark
         elif element.name == 'h3':
             heading = doc.add_heading(element.get_text().strip(), level=3)
         elif element.name == 'p':
-            para = doc.add_paragraph(element.get_text().strip())
+            # Check for page break
+            if 'page-break-before: always' in element.get('style', ''):
+                doc.add_page_break()
+            else:
+                para = doc.add_paragraph(element.get_text().strip())
         elif element.name in ['ul', 'ol']:
             for li in element.find_all('li'):
                 para = doc.add_paragraph(li.get_text().strip())
@@ -55,12 +67,11 @@ def generate_docx(content_html, header_html, footer_html, output_path, watermark
                         if j < cols:  # Safety check
                             table.cell(i, j).text = cell.get_text().strip()
     
-    # Create a section break for the last page
+    # Ensure we have a last section for the footer
+    # Force creation of a new section for the last page
     doc.add_section(WD_SECTION.NEW_PAGE)
-    
-    # Add a simple paragraph to the last page
-    last_para = doc.add_paragraph("End of Document")
-    last_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Add a small paragraph to the last page to ensure it exists
+    doc.add_paragraph("").alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     # Add header if provided
     if header_html:
@@ -69,89 +80,79 @@ def generate_docx(content_html, header_html, footer_html, output_path, watermark
         
         for section in doc.sections:
             header = section.header
-            if not header.paragraphs:
-                header_para = header.add_paragraph()
-            else:
-                header_para = header.paragraphs[0]
+            header_para = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
             header_para.text = header_text
             header_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            # Apply formatting
+            for run in header_para.runs:
+                run.font.size = Pt(10)
+                run.font.color.rgb = RGBColor(119, 119, 119)  # #777
     
     # Add watermark to all pages
     if watermark:
         watermark_text = watermark
         if watermark.startswith('<'):
-            # Extract text from HTML
             watermark_soup = BeautifulSoup(watermark, 'html.parser')
             watermark_text = watermark_soup.get_text().strip()
         
-        # Apply watermark to all sections
-        for section in doc.sections:
-            add_watermark(section, watermark_text.upper())
+        # Use the proper watermark implementation
+        add_proper_watermark(doc, watermark_text)
     
-    # Add footer only to the last section
-    if footer_html:
+    # Disconnect all footers
+    for i, section in enumerate(doc.sections):
+        section.footer_distance = Inches(0.5)  # Set consistent footer distance
+        section.footer.is_linked_to_previous = False  # Disconnect from previous
+        
+        # Clear any existing footer content
+        for p in list(section.footer.paragraphs):
+            p._element.getparent().remove(p._element)
+            p._p = None
+            p._element = None
+    
+    # Add footer to last page only
+    if footer_html and len(doc.sections) > 0:
         footer_soup = BeautifulSoup(footer_html, 'html.parser')
         footer_text = footer_soup.get_text().strip()
         
         # Get the last section
         last_section = doc.sections[-1]
         
-        # Make sure footer doesn't appear on other sections
-        for i, section in enumerate(doc.sections):
-            if i < len(doc.sections) - 1:
-                section.footer.is_linked_to_previous = False
-                if section.footer.paragraphs:
-                    section.footer.paragraphs[0].text = ""
-        
-        # Add footer to the last section only
-        last_section.footer.is_linked_to_previous = False
-        if not last_section.footer.paragraphs:
-            footer_para = last_section.footer.add_paragraph()
-        else:
-            footer_para = last_section.footer.paragraphs[0]
-        
-        footer_para.text = footer_text + " (Last Page Only)"
+        # Create new footer paragraph
+        footer_para = last_section.footer.add_paragraph()
+        footer_para.text = footer_text
         footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # Style the footer
+        for run in footer_para.runs:
+            run.font.size = Pt(10)
+            run.font.color.rgb = RGBColor(119, 119, 119)  # #777
+        
+        # Add a top border to the paragraph
+        set_paragraph_border(footer_para)
     
-    # Save the document
+    # Save the document with everything complete
     doc.save(output_path)
     return output_path
 
-def add_watermark(section, text):
-    """Add a watermark to a section"""
-    # Get the header part
-    header_part = section.header._element
+def set_paragraph_border(paragraph):
+    """
+    Add a top border to a paragraph
     
-    # Check if the watermark already exists
-    for child in header_part.iterchildren():
-        if child.tag.endswith('p'):
-            for grandchild in child.iterchildren():
-                if grandchild.tag.endswith('r'):
-                    return  # Watermark already exists
+    Args:
+        paragraph: The paragraph object to add border to
+    """
+    p = paragraph._p  # Get the paragraph element
+    pPr = p.get_or_add_pPr()  # Get or create paragraph properties
     
-    # Create paragraph for watermark
-    watermark_para = section.header.add_paragraph()
-    watermark_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Create top border element
+    top_border = OxmlElement('w:pBdr')
+    top = OxmlElement('w:top')
+    top.set(qn('w:val'), 'single')
+    top.set(qn('w:sz'), '4')  # Border width
+    top.set(qn('w:space'), '1')
+    top.set(qn('w:color'), 'cccccc')  # Light gray
+    top_border.append(top)
     
-    # Add the watermark text with formatting
-    run = watermark_para.add_run(text)
-    run.font.size = Pt(72)  # Large size
-    run.font.bold = True
-    run.font.color.rgb = RGBColor(191, 191, 191)  # Light gray
-    
-    # Get the XML element for the paragraph
-    p = watermark_para._p
-    
-    # Add vanish property to paragraph properties to make it behind text
-    pPr = p.get_or_add_pPr()
-    
-    # Add watermark effect
-    try:
-        rPr = run._r.get_or_add_rPr()
-        effect = OxmlElement('w:effect')
-        effect.set(qn('w:val'), 'shadow')
-        rPr.append(effect)
-    except:
-        pass
-    
-    return watermark_para
+    # Add border to paragraph properties
+    pPr.append(top_border)

@@ -15,7 +15,10 @@ htmlcov/
 
 # Flask instance folder
 instance/
+pytest.ini
 
+demo/
+tests/
 # Environment variables
 .env
 .flaskenv

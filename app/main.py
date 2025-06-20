@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_restx import Api
 from app.api.document_api import document_ns
@@ -26,7 +26,7 @@ def create_app():
     
     @app.route('/', methods=['GET'])
     def health_check():
-        return {"status": "healthy", "service": "Document Generation Service"}
+        return jsonify({"status": "healthy", "service": "Document Generation Service"})
     
     return app
 
